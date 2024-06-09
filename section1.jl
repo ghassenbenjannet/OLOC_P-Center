@@ -63,23 +63,23 @@ function solve_p_center_exacte(tabX, tabY, p)
     @variable(model, y[1:n], Bin)       # y_j: 1 si une antenne est placée au point j
     @variable(model, z >= 0)            # z: distance maximale à minimiser
 
-    # C1: Au plus p antennes
-    @constraint(model, sum(y[j] for j in 1:n) <= p, name="MaxAntennes")
+    # Contrainte C1: Au plus p antennes, reformulée pour éviter l'erreur
+    @constraint(model, sum(y) <= p)
     
-    # C2: Chaque point est affecté à au moins une antenne
+    # Contrainte C2: Chaque point est affecté à au moins une antenne
     for i in 1:n
-        @constraint(model, sum(x[i, j] for j in 1:n) == 1, name="PointAffecte_$i")
+        @constraint(model, sum(x[i, :]) == 1)
     end
     
-    # C3: Si un point i est affecté à j, alors j doit avoir une antenne
+    # Contrainte C3: Si un point i est affecté à j, alors j doit avoir une antenne
     for i in 1:n, j in 1:n
-        @constraint(model, x[i, j] <= y[j], name="ValiditeAffectation_$i_$j")
+        @constraint(model, x[i, j] <= y[j])
     end
 
-    # C4: La distance de i à son antenne est majorée par z
+    # Contrainte C4: La distance de i à son antenne est majorée par z
     for i in 1:n
         for j in 1:n
-            @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z, name="DistanceMax_$i_$j")
+            @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
         end
     end
     
@@ -95,10 +95,11 @@ function solve_p_center_exacte(tabX, tabY, p)
         S = [value(y[j]) for j in 1:n]  # Récupérer la configuration des antennes
         return S, objective_value(model)
     else
-        println("Pas de solution optimale trouvée. Statut: ", termination_status(model))
+        println("Pas de solution optimale trouvée.")
         return [], Inf
     end
 end
+
 
 
 # la relaxation linéaire
@@ -108,7 +109,7 @@ function solve_p_center_relaxed(tabX, tabY, p)
     
     @variable(model, 0 <= x[1:n, 1:n] <= 1)
     @variable(model, 0 <= y[1:n] <= 1)
-    @variable(model, z)
+    @variable(model, z >= 0)
 
     # Contraintes
     @constraint(model, sum(y[j] for j in 1:n) <= p)
@@ -216,16 +217,16 @@ function main()
     
    
     # S, best_radius = find_better_random_solution(n, p, tabX, tabY)
-    # S, best_radius = solve_p_center_exacte(tabX, tabY, p)
+     S, best_radius = solve_p_center_exacte(tabX, tabY, p)
 
     # pour relaxation
-    y_vals = solve_p_center_relaxed(tabX, tabY, p)
-    S, indices = round_relaxed_solution(y_vals, p)
+    #y_vals = solve_p_center_relaxed(tabX, tabY, p)
+    #S, indices = round_relaxed_solution(y_vals, p)
     # Marquer les positions des antennes sélectionnées
-    for idx in indices
-        S[idx] = 1
-    end
-    best_radius = calculate_max_radius(tabX, tabY, S)
+    #for idx in indices
+    #    S[idx] = 1
+    #end
+    #best_radius = calculate_max_radius(tabX, tabY, S)
 
    # descente:
    #num_iterations = 5
