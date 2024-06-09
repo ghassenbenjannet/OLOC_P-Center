@@ -58,41 +58,44 @@ function solve_p_center_exacte(tabX, tabY, p)
     n = length(tabX)
     model = Model(GLPK.Optimizer)
     
-    @variable(model, x[1:n, 1:n], Bin)  # x_ij
-    @variable(model, y[1:n], Bin)       # x_jj (y[j] pour simplifier)
-    @variable(model, z)                 # Distance maximale à minimiser
-    
+    # Déclaration des variables
+    @variable(model, x[1:n, 1:n], Bin)  # x_ij: 1 si le point i est affecté à l'antenne j
+    @variable(model, y[1:n], Bin)       # y_j: 1 si une antenne est placée au point j
+    @variable(model, z >= 0)            # z: distance maximale à minimiser
+
     # C1: Au plus p antennes
-    @constraint(model, sum(y) <= p)
+    @constraint(model, sum(y[j] for j in 1:n) <= p, name="MaxAntennes")
     
-    # Contrainte C2: Chaque point est affecté à au moins une antenne
+    # C2: Chaque point est affecté à au moins une antenne
     for i in 1:n
-        @constraint(model, sum(x[i, j] for j in 1:n) == 1)
+        @constraint(model, sum(x[i, j] for j in 1:n) == 1, name="PointAffecte_$i")
     end
     
-    # Contrainte C3: Si i est affecté à j, alors j doit avoir une antenne
+    # C3: Si un point i est affecté à j, alors j doit avoir une antenne
     for i in 1:n, j in 1:n
-        @constraint(model, x[i, j] <= y[j])
+        @constraint(model, x[i, j] <= y[j], name="ValiditeAffectation_$i_$j")
     end
 
-    # C4: Distance de i à son antenne est majorée par z
+    # C4: La distance de i à son antenne est majorée par z
     for i in 1:n
         for j in 1:n
-            @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
+            @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z, name="DistanceMax_$i_$j")
         end
     end
     
-    # Minimiser z
+    # Objectif: Minimiser z
     @objective(model, Min, z)
     
+    # Résoudre le problème
     optimize!(model)
     
+    # Vérifier si la solution est optimale
     if termination_status(model) == MOI.OPTIMAL
         println("Solution trouvée avec z = ", objective_value(model))
-        S = [value(y[j]) for j in 1:n]
+        S = [value(y[j]) for j in 1:n]  # Récupérer la configuration des antennes
         return S, objective_value(model)
     else
-        println("Pas de solution optimale habibi")
+        println("Pas de solution optimale trouvée. Statut: ", termination_status(model))
         return [], Inf
     end
 end
