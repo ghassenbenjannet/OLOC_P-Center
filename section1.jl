@@ -2,24 +2,24 @@ using Random
 using Plots
 using JuMP
 using GLPK
-include("IO_UFLP.jl")  # Assurez-vous que le chemin vers le fichier est correct
+include("IO_UFLP.jl") 
 
-# Fonction pour calculer la distance euclidienne
+# Distance
 function dist(x1, y1, x2, y2)
     return sqrt((x2 - x1)^2 + (y2 - y1)^2)
 end
 
-# Fonction pour générer une solution aléatoire
+# Aléatoire
 function generate_random_solution(n, p)
-    S = zeros(Int, n)  # tableau pour marquer les emplacements choisis pour les antennes
-    indices = randperm(n)[1:p]  # choisir aléatoirement p indices
+    S = zeros(Int, n)  
+    indices = randperm(n)[1:p]  
     for idx in indices
         S[idx] = 1
     end
     return S
 end
 
-# Fonction pour calculer le rayon maximal d'une configuration donnée
+# rayon max
 function calculate_max_radius(tabX, tabY, S)
     max_radius = 0.0
     for i in 1:length(tabX)
@@ -37,10 +37,10 @@ function calculate_max_radius(tabX, tabY, S)
     return max_radius
 end
 
-# Fonction pour générer une meilleure solution initiale aléatoire
-function find_better_random_solution(n, p, tabX, tabY, attempts=100)
+# une meilleure solution aléatoire
+function find_better_random_solution(n, p, tabX, tabY, attempts=30)
     best_S = zeros(Int, n)
-    best_radius = Inf
+    best_radius = -1
     for _ in 1:attempts
         S = generate_random_solution(n, p)
         radius = calculate_max_radius(tabX, tabY, S)
@@ -53,7 +53,7 @@ function find_better_random_solution(n, p, tabX, tabY, attempts=100)
 end
 
 
-# Methode exacte :
+# Methode exacte 
 function solve_p_center_exacte(tabX, tabY, p)
     n = length(tabX)
     model = Model(GLPK.Optimizer)
@@ -62,26 +62,29 @@ function solve_p_center_exacte(tabX, tabY, p)
     @variable(model, y[1:n], Bin)       # x_jj (y[j] pour simplifier)
     @variable(model, z)                 # Distance maximale à minimiser
     
-    # Contrainte (1): Au plus p antennes
+    # C1: Au plus p antennes
     @constraint(model, sum(y) <= p)
     
-    # Contrainte (2): Chaque point est affecté à au moins une antenne
-    @constraint(model, cover[i=1:n], sum(x[i, :]) == 1)
+    # Contrainte C2: Chaque point est affecté à au moins une antenne
+    for i in 1:n
+        @constraint(model, sum(x[i, j] for j in 1:n) == 1)
+    end
     
-    # Contrainte (3): Si i est affecté à j, alors j doit avoir une antenne
-    @constraint(model, valid[i=1:n, j=1:n], x[i, j] <= y[j])
-    
-    # Contrainte (4): Distance de i à son antenne est majorée par z
+    # Contrainte C3: Si i est affecté à j, alors j doit avoir une antenne
+    for i in 1:n, j in 1:n
+        @constraint(model, x[i, j] <= y[j])
+    end
+
+    # C4: Distance de i à son antenne est majorée par z
     for i in 1:n
         for j in 1:n
             @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
         end
     end
     
-    # Objectif : Minimiser z
+    # Minimiser z
     @objective(model, Min, z)
     
-    # Résoudre le problème
     optimize!(model)
     
     if termination_status(model) == MOI.OPTIMAL
@@ -89,7 +92,7 @@ function solve_p_center_exacte(tabX, tabY, p)
         S = [value(y[j]) for j in 1:n]
         return S, objective_value(model)
     else
-        println("Pas de solution optimale trouvée.")
+        println("Pas de solution optimale habibi")
         return [], Inf
     end
 end
@@ -104,44 +107,40 @@ function solve_p_center_relaxed(tabX, tabY, p)
     @variable(model, 0 <= y[1:n] <= 1)
     @variable(model, z)
 
-    # Contrainte (1): Au plus p antennes
+    # Contraintes
     @constraint(model, sum(y[j] for j in 1:n) <= p)
+    for i in 1:n
+        @constraint(model, sum(x[i, j] for j in 1:n) == 1)
+    end
     
-    # Contrainte (2): Chaque point est affecté à au moins une antenne
-    @constraint(model, cover[i=1:n], sum(x[i, j] for j in 1:n) == 1)
+    for i in 1:n, j in 1:n
+        @constraint(model, x[i, j] <= y[j])
+    end
     
-    # Contrainte (3): Si i est affecté à j, alors j doit avoir une antenne
-    @constraint(model, valid[i=1:n, j=1:n], x[i, j] <= y[j])
-    
-    # Contrainte (4): Distance de i à son antenne est majorée par z
     for i in 1:n
         for j in 1:n
             @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
         end
     end
     
-    # Objectif : Minimiser z
     @objective(model, Min, z)
     
-    # Résoudre le problème
     optimize!(model)
     
     if termination_status(model) == MOI.OPTIMAL
         y_vals = value.(y)
         return y_vals
     else
-        println("Pas de solution optimale trouvée.")
+        println("Pas de solution optimale trouvée :o ")
         return []
     end
 end
 
 # arrondissement relaxee
 function round_relaxed_solution(y_vals, p)
-    # Choisir les indices des p antennes avec les plus grandes valeurs fractionnaires
     sorted_indices = sortperm(y_vals, rev=true)
     return zeros(Int, length(y_vals)), sorted_indices[1:p]
 end
-
 
 # une descente stochastique sur une solution initiale
 function stochastic_descent(tabX, tabY, p, initial_solution)
@@ -201,35 +200,37 @@ function iterated_stochastic_descent(tabX, tabY, p, num_iterations)
 end
 
 
+
 # Fonction principale
 function main()
-    nom_fichier = "inst_50000.flp"  # Assurez-vous que le chemin et le nom du fichier sont corrects
+    nom_fichier = "inst_10000.flp"  
     tabX, tabY, f = Float64[], Float64[], Float64[]
     n = Lit_fichier_UFLP(nom_fichier, tabX, tabY, f)
-    
-    # Dessiner l'instance des villes
+    p = 8 
+
+    # Dessin des villes
     Dessine_UFLP(nom_fichier)
     
-    p = 8  # Nombre d'antennes à placer
+   
     # S, best_radius = find_better_random_solution(n, p, tabX, tabY)
     # S, best_radius = solve_p_center_exacte(tabX, tabY, p)
 
     # pour relaxation
-    # y_vals = solve_p_center_relaxed(tabX, tabY, p)
-    # S, indices = round_relaxed_solution(y_vals, p)
+    y_vals = solve_p_center_relaxed(tabX, tabY, p)
+    S, indices = round_relaxed_solution(y_vals, p)
     # Marquer les positions des antennes sélectionnées
-    # for idx in indices
-    #     S[idx] = 1
-    # end
-    #best_radius = calculate_max_radius(tabX, tabY, S)
+    for idx in indices
+        S[idx] = 1
+    end
+    best_radius = calculate_max_radius(tabX, tabY, S)
 
-    # descente:
-    num_iterations = 100
-    S, best_radius = iterated_stochastic_descent(tabX, tabY, p, num_iterations)
+   # descente:
+   #num_iterations = 5
+   #S, best_radius = iterated_stochastic_descent(tabX, tabY, p, num_iterations)
 
-    println("Meilleur rayon trouvé: ", best_radius)
+    #println("Meilleur rayon trouvé: ", best_radius)
     
-    # Dessiner la meilleure solution initiale
+    # Dessin de la meilleure solution
     Dessine_UFLP(nom_fichier, n, tabX, tabY, S)
 end
 
