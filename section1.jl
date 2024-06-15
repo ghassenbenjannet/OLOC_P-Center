@@ -2,240 +2,387 @@ using Random
 using Plots
 using JuMP
 using GLPK
-include("IO_UFLP.jl") 
+using DataStructures  # Pour PriorityQueue
+using Printf
+using DataFrames
+include("IO_UFLP.jl")
 
-# Distance
-function dist(x1, y1, x2, y2)
+# Calculer la distance entre deux points
+function distance(x1, y1, x2, y2)
     return sqrt((x2 - x1)^2 + (y2 - y1)^2)
 end
 
-# Aléatoire
-function generate_random_solution(n, p)
-    S = zeros(Int, n)  
-    indices = randperm(n)[1:p]  
+# Générer une solution aléatoire
+function generer_solution_aleatoire(n, p)
+    S = zeros(Int, n)
+    indices = randperm(n)[1:p]
     for idx in indices
         S[idx] = 1
     end
     return S
 end
 
-# rayon max
-function calculate_max_radius(tabX, tabY, S)
-    max_radius = 0.0
+# Calculer le rayon maximal
+function calculer_rayon_max(tabX, tabY, S)
+    rayon_max = 0.0
     for i in 1:length(tabX)
-        min_dist = Inf
+        distance_min = Inf
         for j in 1:length(tabX)
             if S[j] == 1
-                distance = dist(tabX[i], tabY[i], tabX[j], tabY[j])
-                if distance < min_dist
-                    min_dist = distance
+                dist = distance(tabX[i], tabY[i], tabX[j], tabY[j])
+                if dist < distance_min
+                    distance_min = dist
                 end
             end
         end
-        max_radius = max(max_radius, min_dist)
+        rayon_max = max(rayon_max, distance_min)
     end
-    return max_radius
+    return rayon_max
 end
 
-# une meilleure solution aléatoire
-function find_better_random_solution(n, p, tabX, tabY, attempts=30)
-    best_S = zeros(Int, n)
-    best_radius = -1
-    for _ in 1:attempts
-        S = generate_random_solution(n, p)
-        radius = calculate_max_radius(tabX, tabY, S)
-        if radius < best_radius
-            best_radius = radius
-            best_S = S
+# Trouver une meilleure solution aléatoire
+function trouver_meilleure_solution_aleatoire(n, p, tabX, tabY, essais=30)
+    meilleure_S = zeros(Int, n)
+    meilleur_rayon = Inf
+    for _ in 1:essais
+        S = generer_solution_aleatoire(n, p)
+        rayon = calculer_rayon_max(tabX, tabY, S)
+        if rayon < meilleur_rayon
+            meilleur_rayon = rayon
+            meilleure_S = S
         end
     end
-    return best_S, best_radius
+    return meilleure_S, meilleur_rayon
 end
 
-
-# Methode exacte 
-function solve_p_center_exacte(tabX, tabY, p)
+# Méthode exacte pour résoudre le problème p-center
+function resoudre_p_center_exact(tabX, tabY, p)
     n = length(tabX)
-    model = Model(GLPK.Optimizer)
-    
-    # Déclaration des variables
-    @variable(model, x[1:n, 1:n], Bin)  # x_ij: 1 si le point i est affecté à l'antenne j
-    @variable(model, y[1:n], Bin)       # y_j: 1 si une antenne est placée au point j
-    @variable(model, z >= 0)            # z: distance maximale à minimiser
+    modele = Model(GLPK.Optimizer)
 
-    # Contrainte C1: Au plus p antennes, reformulée pour éviter l'erreur
-    @constraint(model, sum(y) <= p)
-    
+    # Déclaration des variables
+    @variable(modele, x[1:n, 1:n], Bin)  # x_ij: 1 si le point i est affecté à l'antenne j
+    @variable(modele, y[1:n], Bin)       # y_j: 1 si une antenne est placée au point j
+    @variable(modele, z >= 0)            # z: distance maximale à minimiser
+
+    # Contrainte C1: Au plus p antennes
+    @constraint(modele, sum(y) <= p)
+
     # Contrainte C2: Chaque point est affecté à au moins une antenne
     for i in 1:n
-        @constraint(model, sum(x[i, :]) == 1)
+        @constraint(modele, sum(x[i, :]) == 1)
     end
-    
+
     # Contrainte C3: Si un point i est affecté à j, alors j doit avoir une antenne
     for i in 1:n, j in 1:n
-        @constraint(model, x[i, j] <= y[j])
+        @constraint(modele, x[i, j] <= y[j])
     end
 
     # Contrainte C4: La distance de i à son antenne est majorée par z
     for i in 1:n
         for j in 1:n
-            @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
+            @constraint(modele, x[i, j] * distance(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
         end
     end
-    
+
     # Objectif: Minimiser z
-    @objective(model, Min, z)
-    
+    @objective(modele, Min, z)
+
     # Résoudre le problème
-    optimize!(model)
-    
+    optimize!(modele)
+
     # Vérifier si la solution est optimale
-    if termination_status(model) == MOI.OPTIMAL
-        println("Solution trouvée avec z = ", objective_value(model))
+    if termination_status(modele) == MOI.OPTIMAL
+        println("Solution trouvée avec z = ", objective_value(modele))
         S = [value(y[j]) for j in 1:n]  # Récupérer la configuration des antennes
-        return S, objective_value(model)
+        return S, objective_value(modele)
     else
         println("Pas de solution optimale trouvée.")
         return [], Inf
     end
 end
 
-
-
-# la relaxation linéaire
-function solve_p_center_relaxed(tabX, tabY, p)
+# La relaxation linéaire
+function resoudre_p_center_relax(tabX, tabY, p)
     n = length(tabX)
-    model = Model(GLPK.Optimizer)
-    
-    @variable(model, 0 <= x[1:n, 1:n] <= 1)
-    @variable(model, 0 <= y[1:n] <= 1)
-    @variable(model, z >= 0)
+    modele = Model(GLPK.Optimizer)
+
+    @variable(modele, 0 <= x[1:n, 1:n] <= 1)
+    @variable(modele, 0 <= y[1:n] <= 1)
+    @variable(modele, z >= 0)
 
     # Contraintes
-    @constraint(model, sum(y[j] for j in 1:n) <= p)
+    @constraint(modele, sum(y[j] for j in 1:n) <= p)
     for i in 1:n
-        @constraint(model, sum(x[i, j] for j in 1:n) == 1)
+        @constraint(modele, sum(x[i, j] for j in 1:n) == 1)
     end
-    
+
     for i in 1:n, j in 1:n
-        @constraint(model, x[i, j] <= y[j])
+        @constraint(modele, x[i, j] <= y[j])
     end
-    
+
     for i in 1:n
         for j in 1:n
-            @constraint(model, x[i, j] * dist(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
+            @constraint(modele, x[i, j] * distance(tabX[i], tabY[i], tabX[j], tabY[j]) <= z)
         end
     end
-    
-    @objective(model, Min, z)
-    
-    optimize!(model)
-    
-    if termination_status(model) == MOI.OPTIMAL
+
+    @objective(modele, Min, z)
+
+    optimize!(modele)
+
+    if termination_status(modele) == MOI.OPTIMAL
         y_vals = value.(y)
-        return y_vals
+        return y_vals, objective_value(modele)
     else
-        println("Pas de solution optimale trouvée :o ")
-        return []
+        println("Pas de solution optimale trouvée.")
+        return [], Inf
     end
 end
 
-# arrondissement relaxee
-function round_relaxed_solution(y_vals, p)
-    sorted_indices = sortperm(y_vals, rev=true)
-    return zeros(Int, length(y_vals)), sorted_indices[1:p]
+# Arrondi relaxé (simple arrondi)
+function arrondir_solution_relax(y_vals, p, tabX, tabY)
+    indices_tries = sortperm(y_vals, rev=true)
+    solution_arrondie = zeros(Int, length(y_vals))
+    indices = indices_tries[1:p]
+    for idx in indices
+        solution_arrondie[idx] = 1
+    end
+
+    # Recalculer le rayon maximal pour cette solution entière
+    rayon_entier = calculer_rayon_max(tabX, tabY, solution_arrondie)
+
+    return solution_arrondie, Int(ceil(rayon_entier))
 end
 
-# une descente stochastique sur une solution initiale
-function stochastic_descent(tabX, tabY, p, initial_solution)
-    current_solution = copy(initial_solution)
-    best_solution = copy(initial_solution)
-    best_radius = calculate_max_radius(tabX, tabY, best_solution)
-    unchanged_rounds = 0
-    max_unchanged_rounds = 20  # Nombre d'itérations sans amélioration avant d'arrêter
+# Descente stochastique améliorée sur une solution initiale
+function descente_stochastique(tabX, tabY, p, solution_initiale)
+    solution_actuelle = copy(solution_initiale)
+    meilleure_solution = copy(solution_initiale)
+    meilleur_rayon = calculer_rayon_max(tabX, tabY, meilleure_solution)
+    println("Valeur initiale de z (descente stochastique) : ", meilleur_rayon)
+    iterations_sans_ameli = 0
+    max_iterations_sans_ameli = 100  # Nombre d'itérations sans amélioration avant d'arrêter
 
-    while unchanged_rounds < max_unchanged_rounds
-        # Sélectionner aléatoirement une antenne à déplacer
-        antenne_idx = findall(x -> x == 1, current_solution)
-        non_antenne_idx = findall(x -> x == 0, current_solution)
+    while iterations_sans_ameli < max_iterations_sans_ameli
+        amelioration = false
 
-        if isempty(antenne_idx) || isempty(non_antenne_idx)
-            break
+        # Parcourir chaque antenne et essayer de la déplacer
+        for i in 1:length(solution_actuelle)
+            if solution_actuelle[i] == 1
+                for j in 1:length(solution_actuelle)
+                    if solution_actuelle[j] == 0
+                        solution_actuelle[i] = 0
+                        solution_actuelle[j] = 1
+
+                        # Évaluer la nouvelle solution
+                        rayon_actuel = calculer_rayon_max(tabX, tabY, solution_actuelle)
+
+                        if rayon_actuel < meilleur_rayon
+                            meilleure_solution = copy(solution_actuelle)
+                            meilleur_rayon = rayon_actuel
+                            amelioration = true
+                        else
+                            # Revenir à la solution précédente
+                            solution_actuelle[i] = 1
+                            solution_actuelle[j] = 0
+                        end
+                    end
+                end
+            end
         end
 
-        # Faire un échange aléatoire
-        swap_out = rand(antenne_idx)
-        swap_in = rand(non_antenne_idx)
-
-        current_solution[swap_out] = 0
-        current_solution[swap_in] = 1
-
-        # Évaluer la nouvelle solution
-        current_radius = calculate_max_radius(tabX, tabY, current_solution)
-
-        if current_radius < best_radius
-            best_solution = copy(current_solution)
-            best_radius = current_radius
-            unchanged_rounds = 0  # Réinitialiser le compteur d'arrêt
+        if amelioration
+            iterations_sans_ameli = 0
         else
-            unchanged_rounds += 1
+            iterations_sans_ameli += 1
         end
     end
 
-    return best_solution, best_radius
+    println("Valeur de z après descente stochastique : ", meilleur_rayon)
+    return meilleure_solution, Int(ceil(meilleur_rayon))
 end
 
-# descente stochastique itérée
-function iterated_stochastic_descent(tabX, tabY, p, num_iterations)
-    best_global_solution = []
-    best_global_radius = Inf
+# Descente stochastique itérée
+function descente_stochastique_iteree(tabX, tabY, p, nb_iterations)
+    meilleure_solution_globale = []
+    meilleur_rayon_global = Inf
 
-    for i in 1:num_iterations
-        initial_solution = generate_random_solution(length(tabX), p)
-        local_solution, local_radius = stochastic_descent(tabX, tabY, p, initial_solution)
+    for i in 1:nb_iterations
+        solution_initiale = generer_solution_aleatoire(length(tabX), p)
+        solution_locale, rayon_local = descente_stochastique(tabX, tabY, p, solution_initiale)
 
-        if local_radius < best_global_radius
-            best_global_solution = local_solution
-            best_global_radius = local_radius
+        if rayon_local < meilleur_rayon_global
+            meilleure_solution_globale = solution_locale
+            meilleur_rayon_global = rayon_local
         end
     end
 
-    return best_global_solution, best_global_radius
+    println("Valeur de z après descente stochastique itérée : ", meilleur_rayon_global)
+    return meilleure_solution_globale, meilleur_rayon_global
 end
+
+# Définir la structure du noeud pour le Branch and Bound
+struct Noeud
+    fixe::Vector{Int}
+    libre::Vector{Int}
+    borne_inf::Float64
+end
+
+# Branch and Bound
+function branch_and_bound(tabX, tabY, p)
+    n = length(tabX)
+    meilleure_solution = []
+    meilleur_rayon = Inf
+
+    # Utiliser une file de priorité pour gérer les nœuds partiels
+    file = PriorityQueue{Noeud, Float64}()
+
+    # Fonction pour insérer dans la file de priorité
+    function inserer!(file, noeud)
+        enqueue!(file, noeud => noeud.borne_inf)
+    end
+
+    # Initialisation de la file avec le nœud racine
+    noeud_racine = Noeud(Int[], collect(1:n), 0.0)
+    inserer!(file, noeud_racine)
+
+    while !isempty(file)
+        current_noeud = dequeue!(file)
+
+        fixe, libre, borne_inf = current_noeud.fixe, current_noeud.libre, current_noeud.borne_inf
+
+        # Si le nœud est une solution complète
+        if length(fixe) == p
+            S = zeros(Int, n)
+            for idx in fixe
+                S[idx] = 1
+            end
+            rayon = calculer_rayon_max(tabX, tabY, S)
+            if rayon < meilleur_rayon
+                meilleur_rayon = rayon
+                meilleure_solution = S
+            end
+            continue
+        end
+
+        # Si le nœud est élagué
+        if borne_inf >= meilleur_rayon
+            continue
+        end
+
+        # Brancher le nœud
+        for idx in libre
+            nouveau_fixe = vcat(fixe, idx)
+            nouveau_libre = setdiff(libre, [idx])
+
+            # Calculer la borne inférieure pour le nouveau nœud
+            S = zeros(Int, n)
+            for id in nouveau_fixe
+                S[id] = 1
+            end
+
+            _, nouvelle_borne_inf = resoudre_p_center_relax(tabX, tabY, p - length(nouveau_fixe))
+            nouvelle_borne_inf += calculer_rayon_max(tabX, tabY, S)
+
+            if nouvelle_borne_inf < meilleur_rayon
+                nouveau_noeud = Noeud(nouveau_fixe, nouveau_libre, nouvelle_borne_inf)
+                inserer!(file, nouveau_noeud)
+            end
+        end
+    end
+
+    return meilleure_solution, Int(ceil(meilleur_rayon))
+end
+
+# Fonction pour comparer les méthodes
+function comparer_methodes(nom_fichier, p)
+    tabX, tabY, f = Float64[], Float64[], Float64[]
+    n = Lit_fichier_UFLP(nom_fichier, tabX, tabY, f)
+
+    methodes = ["Méthode exacte", "Solution aléatoire améliorée", "Relaxation linéaire", "Descente stochastique itérée", "Branch and Bound"]
+    resultats = DataFrame(Method = String[], Z = Float64[], Gap = Float64[], Temps = Float64[])
+
+    z_optimal = 0.0
+    @time begin
+        _, z_optimal = resoudre_p_center_exact(tabX, tabY, p)
+    end
+
+    for methode in methodes
+        println("Exécution de la méthode : ", methode)
+        temps = @elapsed begin
+            if methode == "Méthode exacte"
+                _, z = resoudre_p_center_exact(tabX, tabY, p)
+            elseif methode == "Solution aléatoire améliorée"
+                _, z = trouver_meilleure_solution_aleatoire(n, p, tabX, tabY)
+            elseif methode == "Relaxation linéaire"
+                y_vals, _ = resoudre_p_center_relax(tabX, tabY, p)
+                _, z = arrondir_solution_relax(y_vals, p, tabX, tabY)
+            elseif methode == "Descente stochastique itérée"
+                _, z = descente_stochastique_iteree(tabX, tabY, p, 100)
+            elseif methode == "Branch and Bound"
+                _, z = branch_and_bound(tabX, tabY, p)
+            end
+        end
+
+        gap = (z - z_optimal) / z_optimal
+        push!(resultats, (methode, z, gap, temps))
+    end
+
+    println(resultats)
+    return resultats
+end
+
 
 
 
 # Fonction principale
 function main()
-    nom_fichier = "inst_10000.flp"  
+    nom_fichier = "inst_100000.flp"
     tabX, tabY, f = Float64[], Float64[], Float64[]
     n = Lit_fichier_UFLP(nom_fichier, tabX, tabY, f)
-    p = 8 
+    p = 3
 
     # Dessin des villes
     Dessine_UFLP(nom_fichier)
-    
-   
-    # S, best_radius = find_better_random_solution(n, p, tabX, tabY)
-     S, best_radius = solve_p_center_exacte(tabX, tabY, p)
 
-    # pour relaxation
-    #y_vals = solve_p_center_relaxed(tabX, tabY, p)
-    #S, indices = round_relaxed_solution(y_vals, p)
-    # Marquer les positions des antennes sélectionnées
-    #for idx in indices
-    #    S[idx] = 1
-    #end
-    #best_radius = calculate_max_radius(tabX, tabY, S)
+    println("Choisissez une méthode de résolution :")
+    println("[1] : Méthode exacte")
+    println("[2] : Solution aléatoire améliorée")
+    println("[3] : Relaxation linéaire")
+    println("[4] : Descente stochastique itérée")
+    println("[5] : Branch and Bound")
+    println("[6] : comparaison des méthodes")
 
-   # descente:
-   #num_iterations = 5
-   #S, best_radius = iterated_stochastic_descent(tabX, tabY, p, num_iterations)
 
-    #println("Meilleur rayon trouvé: ", best_radius)
-    
-    # Dessin de la meilleure solution
-    Dessine_UFLP(nom_fichier, n, tabX, tabY, S)
+    choix = parse(Int, readline())
+
+    if choix == 1
+        S, meilleur_rayon = resoudre_p_center_exact(tabX, tabY, p)
+        Dessine_UFLP(nom_fichier, n, tabX, tabY, S)
+    elseif choix == 2
+        S, meilleur_rayon = trouver_meilleure_solution_aleatoire(n, p, tabX, tabY)
+        Dessine_UFLP(nom_fichier, n, tabX, tabY, S)
+    elseif choix == 3
+        y_vals, _ = resoudre_p_center_relax(tabX, tabY, p)
+        S, meilleur_rayon = arrondir_solution_relax(y_vals, p, tabX, tabY)
+        println("Valeur de z après relaxation et arrondi : ", meilleur_rayon)
+        Dessine_UFLP(nom_fichier, n, tabX, tabY, S)
+    elseif choix == 4
+        nb_iterations = 5
+        S, meilleur_rayon = descente_stochastique_iteree(tabX, tabY, p, nb_iterations)
+    elseif choix == 5
+        S, meilleur_rayon = branch_and_bound(tabX, tabY, p)
+        Dessine_UFLP(nom_fichier, n, tabX, tabY, S)
+    elseif choix == 6
+        comparer_methodes(nom_fichier, p)
+    else
+        println("Choix invalide")
+        return
+    end
+
+    println("=> Meilleur rayon trouvé: ", meilleur_rayon)
+
 end
 
 main()

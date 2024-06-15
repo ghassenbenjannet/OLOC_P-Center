@@ -1,13 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-
+from scipy.spatial import cKDTree
 
 def random_method(points, p):
     indices = np.random.choice(range(len(points)), size=p, replace=False)
     antennes = points[indices]
     return antennes
-
 
 def min_distance_method(points, p):
     antennes = []
@@ -15,13 +14,14 @@ def min_distance_method(points, p):
     first_index = np.random.choice(range(len(points)))
     antennes.append(points[first_index])
     
+    tree = cKDTree(points)
+    
     for _ in range(p - 1):
-        max_dist = np.array([np.min([np.linalg.norm(point - ant) for ant in antennes]) for point in points])
-        next_index = np.argmax(max_dist)
-        antennes.append(points[next_index])
+        distances, _ = tree.query(antennes, k=1)
+        max_dist_index = np.argmax(distances)
+        antennes.append(points[max_dist_index])
     
     return np.array(antennes)
-
 
 def plot_solution(points, antennes):
     plt.figure(figsize=(10, 6))
@@ -38,7 +38,6 @@ def plot_solution(points, antennes):
     plt.grid(True)
     plt.show()
 
-
 def read_uflp_file(file_name):
     data = pd.read_csv(file_name, sep='\s+', header=None, skiprows=1)
     tabX = data[2].astype(float).values  
@@ -48,7 +47,7 @@ def read_uflp_file(file_name):
 # Main
 nom_fichier = "inst_0.flp" 
 points = read_uflp_file(nom_fichier)
-p = 100
+p = 16000
 
 antennes = min_distance_method(points, p)
 
