@@ -229,7 +229,7 @@ struct Noeud
     borne_inf::Float64
 end
 
-# Branch and Bound
+# Fonction principale branch and bound
 function branch_and_bound(tabX, tabY, p)
     n = length(tabX)
     meilleure_solution = []
@@ -338,7 +338,7 @@ end
 
 # Fonction principale
 function main()
-    nom_fichier = "inst_100000.flp"
+    nom_fichier = "inst_300000.flp"
     tabX, tabY, f = Float64[], Float64[], Float64[]
     n = Lit_fichier_UFLP(nom_fichier, tabX, tabY, f)
     p = 3

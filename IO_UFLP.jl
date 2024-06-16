@@ -91,8 +91,8 @@ function Dessine_UFLP(nom_fichier, n, tabX, tabY, S)
        min=10e10
        minj=0
        for j=1:n
-          if ( (S[j]==1) && (min>dist(tabX[i],tabY[i],tabX[j],tabY[j])) )
-              min=dist(tabX[i],tabY[i],tabX[j],tabY[j])                          
+          if ( (S[j]==1) && (min>distance(tabX[i],tabY[i],tabX[j],tabY[j])) )
+              min=distance(tabX[i],tabY[i],tabX[j],tabY[j])                          
               minj=j             
           end
        end
